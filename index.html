@@ -79,7 +79,6 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
             padding: 16px;
             text-align: center;
-            transition: all 0.2s;
         }
         canvas {
             background: white;
@@ -110,6 +109,14 @@
             font-size: 0.75rem;
             text-align: center;
             color: #426579;
+        }
+        .error-note {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 10px 15px;
+            margin-top: 15px;
+            font-size: 0.8rem;
+            border-radius: 8px;
         }
         @media (max-width: 800px) {
             .two-columns { flex-direction: column; }
@@ -153,9 +160,13 @@
         <div class="info-tag">🌊 Área máxima <strong>A<sub>max</sub></strong> = <span id="optA">—</span> m²</div>
         <div class="info-tag">📐 Ancho superficial = <span id="topWidth">—</span> m</div>
     </div>
+
+    <div class="error-note">
+        ✅ <strong>Fórmula corregida:</strong> y* = P / [2·(2√(1+m²) - m)] | Para P=12, m=1 → y* = 12 / (2·(2.828-1)) = 12 / 3.656 = 3.28 m
+    </div>
     <footer>
         Parámetros libres: P (perímetro disponible) y m (inclinación H:V). <br>
-        Solución óptima: y* = P / [2·(√(1+m²) - m)] , b* = P - 2·y*·√(1+m²).
+        Solución óptima: y* = P / [2·(2√(1+m²) - m)] , b* = P - 2·y*·√(1+m²).
     </footer>
 </div>
 
@@ -176,21 +187,21 @@
         const plotCanvas = document.getElementById('plotCanvas');
         const ctxPlot = plotCanvas.getContext('2d');
 
-        // Variables del problema
-        let P = 12;      // perímetro mojado [m]
-        let m = 1.0;     // talud H:V
+        let P = 12;
+        let m = 1.0;
 
-        // Función que calcula el óptimo analíticamente
+        // FÓRMULA CORREGIDA para la altura óptima
         function computeOptimal() {
             const sqrtTerm = Math.sqrt(1 + m*m);
-            // Altura óptima: derivada de A(y) = y*(P - 2*sqrtTerm*y + m*y)
-            // A(y) = P*y - (2*sqrtTerm - m)*y^2
-            const denom = 2 * (sqrtTerm - m);
-            const yOpt = (denom > 0) ? P / denom : P / (2*sqrtTerm); // si m muy grande, fallback
+            // Denominador corregido: 2 * (2*sqrtTerm - m)
+            const denom = 2 * (2 * sqrtTerm - m);
+            const yOpt = (denom > 0) ? P / denom : P / (2 * sqrtTerm);
             const bOpt = P - 2 * yOpt * sqrtTerm;
-            const areaOpt = yOpt * (bOpt + m * yOpt);
-            const topWidth = bOpt + 2 * m * yOpt;
-            return { yOpt, bOpt, areaOpt, topWidth };
+            // Aseguramos que bOpt no sea negativo para la visualización
+            const bOptValid = Math.max(0, bOpt);
+            const areaOpt = yOpt * (bOptValid + m * yOpt);
+            const topWidth = bOptValid + 2 * m * yOpt;
+            return { yOpt, bOpt: bOptValid, areaOpt, topWidth, bOptReal: bOpt };
         }
 
         function updateInfo() {
@@ -202,7 +213,6 @@
             return { yOpt, bOpt, areaOpt, topWidth };
         }
 
-        // Dibujo de la geometría (trapecio isósceles)
         function drawGeometry() {
             const w = geomCanvas.clientWidth;
             const h = geomCanvas.clientHeight;
@@ -212,14 +222,19 @@
             ctxGeom.clearRect(0, 0, w, h);
             
             const { yOpt, bOpt, topWidth } = computeOptimal();
-            const maxHeight = Math.min(yOpt, 5); // evitar desborde visual
-            // Escala: altura del dibujo ~ 0.7 del canvas
+            if (yOpt <= 0 || bOpt <= 0) {
+                ctxGeom.fillStyle = "#cc0000";
+                ctxGeom.font = "14px sans-serif";
+                ctxGeom.fillText("Valores inválidos - ajuste los parámetros", 30, h/2);
+                return;
+            }
+            
+            const maxHeight = Math.min(yOpt, 8);
             const scaleY = (h * 0.65) / (maxHeight + 0.01);
             const scaleX = scaleY;
             const offsetX = w/2;
             const baseY = h - 40;
             
-            // Coordenadas trapecio
             const yPx = yOpt * scaleY;
             const baseMitad = (bOpt * scaleX) / 2;
             const topMitad = (topWidth * scaleX) / 2;
@@ -228,7 +243,6 @@
             const xLeftTop = offsetX - topMitad;
             const xRightTop = offsetX + topMitad;
             
-            // Dibujar trapecio
             ctxGeom.beginPath();
             ctxGeom.moveTo(xLeftBase, baseY);
             ctxGeom.lineTo(xRightBase, baseY);
@@ -241,7 +255,6 @@
             ctxGeom.lineWidth = 2;
             ctxGeom.stroke();
             
-            // Línea de superficie libre
             ctxGeom.beginPath();
             ctxGeom.moveTo(xLeftTop, baseY - yPx);
             ctxGeom.lineTo(xRightTop, baseY - yPx);
@@ -250,17 +263,15 @@
             ctxGeom.stroke();
             ctxGeom.setLineDash([]);
             
-            // Etiquetas
             ctxGeom.font = "12px 'Segoe UI'";
             ctxGeom.fillStyle = '#1d4e6e';
-            ctxGeom.fillText(`b* = ${bOpt.toFixed(2)} m`, offsetX - 25, baseY + 16);
+            ctxGeom.fillText(`b* = ${bOpt.toFixed(2)} m`, offsetX - 30, baseY + 16);
             ctxGeom.fillStyle = '#237b3f';
-            ctxGeom.fillText(`y* = ${yOpt.toFixed(2)} m`, offsetX + 40, baseY - yPx/2);
+            ctxGeom.fillText(`y* = ${yOpt.toFixed(2)} m`, offsetX + 20, baseY - yPx/2);
             ctxGeom.fillStyle = '#8b5a2b';
-            ctxGeom.fillText(`talud 1:${m.toFixed(2)}`, xLeftTop - 45, baseY - yPx/2);
+            ctxGeom.fillText(`talud 1:${m.toFixed(2)}`, xLeftTop - 50, baseY - yPx/2);
         }
 
-        // Gráfica A(y) vs y
         function drawPlot() {
             const w = plotCanvas.clientWidth;
             const h = plotCanvas.clientHeight;
@@ -273,17 +284,17 @@
             const innerW = w - margin.left - margin.right;
             const innerH = h - margin.top - margin.bottom;
             
-            // Rango de y: [0, yMax] donde yMax = P/(2*sqrt(1+m²)-m) *1.2
             const sqrtTerm = Math.sqrt(1 + m*m);
-            const yc = P / (sqrtTerm - m + 0.001);
-            const yMax = Math.min(P/1.5, yc * 1.25); // seguro
+            const denom = 2 * (2 * sqrtTerm - m);
+            const yOptTeorico = P / denom;
+            const yMax = Math.min(P/1.5, yOptTeorico * 2.2);
+            
             const { areaOpt } = computeOptimal();
-            const areaMaxPlot = areaOpt * 1.1;
+            const areaMaxPlot = (areaOpt > 0 ? areaOpt * 1.2 : 50);
             
             function toX(y) { return margin.left + (y / yMax) * innerW; }
             function toY(A) { return margin.top + innerH - (A / areaMaxPlot) * innerH; }
             
-            // Ejes
             ctxPlot.beginPath();
             ctxPlot.moveTo(margin.left, margin.top);
             ctxPlot.lineTo(margin.left, margin.top+innerH);
@@ -300,14 +311,13 @@
             ctxPlot.fillText("Área transversal A(y) [m²]", -25, 0);
             ctxPlot.restore();
             
-            // curva A(y)
             const steps = 200;
             ctxPlot.beginPath();
             let first = true;
             for (let i = 0; i <= steps; i++) {
                 const y = (i/steps) * yMax;
                 const b_aux = P - 2*y*sqrtTerm;
-                if (b_aux < 0) break;
+                if (b_aux < 0) continue;
                 const A = y * (b_aux + m*y);
                 const x = toX(y);
                 const yPlot = toY(A);
@@ -322,28 +332,29 @@
             ctxPlot.lineWidth = 2.8;
             ctxPlot.stroke();
             
-            // Punto óptimo
             const { yOpt, areaOpt: AoptVal } = computeOptimal();
-            const xOpt = toX(yOpt);
-            const yOptPlot = toY(AoptVal);
-            ctxPlot.beginPath();
-            ctxPlot.arc(xOpt, yOptPlot, 7, 0, 2*Math.PI);
-            ctxPlot.fillStyle = '#e2583e';
-            ctxPlot.fill();
-            ctxPlot.beginPath();
-            ctxPlot.arc(xOpt, yOptPlot, 3, 0, 2*Math.PI);
-            ctxPlot.fillStyle = 'white';
-            ctxPlot.fill();
-            ctxPlot.fillStyle = '#c0392b';
-            ctxPlot.font = "bold 11px monospace";
-            ctxPlot.fillText(`óptimo (${yOpt.toFixed(2)} m , ${AoptVal.toFixed(1)} m²)`, xOpt+6, yOptPlot-8);
-            ctxPlot.setLineDash([6,6]);
-            ctxPlot.beginPath();
-            ctxPlot.moveTo(xOpt, margin.top);
-            ctxPlot.lineTo(xOpt, margin.top+innerH);
-            ctxPlot.strokeStyle = '#e2583e';
-            ctxPlot.stroke();
-            ctxPlot.setLineDash([]);
+            if (yOpt > 0 && yOpt < yMax && AoptVal > 0) {
+                const xOpt = toX(yOpt);
+                const yOptPlot = toY(AoptVal);
+                ctxPlot.beginPath();
+                ctxPlot.arc(xOpt, yOptPlot, 7, 0, 2*Math.PI);
+                ctxPlot.fillStyle = '#e2583e';
+                ctxPlot.fill();
+                ctxPlot.beginPath();
+                ctxPlot.arc(xOpt, yOptPlot, 3, 0, 2*Math.PI);
+                ctxPlot.fillStyle = 'white';
+                ctxPlot.fill();
+                ctxPlot.fillStyle = '#c0392b';
+                ctxPlot.font = "bold 11px monospace";
+                ctxPlot.fillText(`óptimo (${yOpt.toFixed(2)} m , ${AoptVal.toFixed(1)} m²)`, xOpt+6, yOptPlot-8);
+                ctxPlot.setLineDash([6,6]);
+                ctxPlot.beginPath();
+                ctxPlot.moveTo(xOpt, margin.top);
+                ctxPlot.lineTo(xOpt, margin.top+innerH);
+                ctxPlot.strokeStyle = '#e2583e';
+                ctxPlot.stroke();
+                ctxPlot.setLineDash([]);
+            }
         }
         
         function updateAll() {
